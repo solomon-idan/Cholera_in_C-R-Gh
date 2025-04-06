@@ -6,11 +6,13 @@ editor: visual
 
 ### **1. Setup the SIR Model with Interventions**
 
-We’ll use the `epidemics` package for flexible compartmental modeling. Install it first
+Model Graph
+
+We’ll use the `odin` package for flexible compartmental modeling. Install it first
 
 ```{r}
-# Install Epiverse packages
-install.packages("epidemics", repos = c("https://epiverse-trace.r-universe.dev", "https://cloud.r-project.org"))
+# Install odin package
+install.packages("odin")
 ```
 
 ### **2. Model Equations with Interventions**
@@ -78,7 +80,7 @@ parameters <- list(
   mu = 0.006,     # Death rate 
   beta0 = 0.52,  # Baseline transmission rate
   hw_effect = 0,  # Handwashing effect (baseline = 0)
-  t_vax = c(0, 20, 90),  # Time points for vaccination schedule (day 30 to day 90)
+  t_vax = c(0, 25, 90),  # Time points for vaccination schedule (day 25 to day 90)
   vax_schedule = c(0,0,0)  # Vaccination rates at time points
 )
 
@@ -87,13 +89,13 @@ sim_baseline <- do.call(model$new, parameters)
 
 # Vaccination scenario:potency rate of vaccine (50% potency at initial vacination and reduction in potency 40% at day 90) 
 sim_vax <- do.call(model$new, modifyList(parameters, list(
-  vax_schedule = c(0, 0.50,0.40),# Vaccination starts at day 30
+  vax_schedule = c(0, 0.70,0.60),# Vaccination starts at day 25
   hw_effect = 0  
 )))
 
-# Vaccination + Handwashing (15% transmission reduction)
+# Vaccination + Handwashing (10% transmission reduction)
 sim_vax_hw <- do.call(model$new, modifyList(parameters, list(
-  vax_schedule = c(0, 0.50, 0.40),  # Vaccination starts at day 30
+  vax_schedule = c(0, 0.70, 0.60),  # Vaccination starts at day 25
   hw_effect = 0.1  # 10% transmission reduction
 )))
 
@@ -126,26 +128,49 @@ compare_results <- rbind(
 
 # Plot
 # Plot results
-ggplot(out_baseline_results, aes(x = Time)) +
+sir_plot <- ggplot(out_baseline_results, aes(x = Time)) +
   geom_line(aes(y = Susceptible, color = "Susceptible"), linewidth = 1.2) +
   geom_line(aes(y = Infected, color = "Infected"), linewidth = 1.2) +
   geom_line(aes(y = Recovered, color = "Recovered"), linewidth = 1.2) +
   labs(
     title = "Cholera Outbreak Stimulation in Central Region, Ghana",
-    subtitle = "SIR Model with Deaths, Vaccination (starts at day 30), and Handwashing (10% reduction)",
+    subtitle = "SIR Model with no Intervention",
     y = "Number of Individuals",
     x = "Time (Days)",
-    color = "Compartment"
+    color = "Compartment",
   ) +
-  theme_minimal()
+  theme_minimal()+ theme(plot.title = element_text(hjust = 0.5),
+                         plot.subtitle = element_text(hjust = 0.5))
 
-ggplot(compare_results, aes(x = Time, y = Infected, color = Model)) +
+sir_plot
+
+interv_plot <- ggplot(compare_results, aes(x = Time, y = Infected, color = Model)) +
   geom_line(linewidth = 1.2) +
   labs(
     title = "Cholera Outbreak Stimulation in Ghana: Impact of Interventions",
-    subtitle = "SIR Model with Vaccination and Handwashing Interventions",
+    subtitle = "Stimulated Infection with Vaccination and Handwashing Interventions",
     y = "Active Infections",
     caption = "Assumptions: R0 = 2.5, 5-day infectious period, 120-day simulation"
   ) +
-  theme_minimal()
+  theme_minimal() + theme(plot.title = element_text(hjust = 0.5),
+                         plot.subtitle = element_text(hjust = 0.5))
+
+interv_plot
+```
+
+```{r}
+# Function to find peak infection and time for each scenario
+find_peak <- function(simulation_output) {
+  max_infected <- max(simulation_output[, "I"])
+  peak_time <- which.max(simulation_output[, "I"]) - 1  # Adjust for 0-based index
+  return(list(peak_time = peak_time, peak_infected = max_infected))
+}
+
+# Find peaks for each scenario
+peak_baseline <- find_peak(out_baseline)
+peak_baseline
+peak_vax <- find_peak(out_vax)
+peak_vax
+peak_vax_hw <- find_peak(out_vax_hw)
+peak_vax_hw
 ```
