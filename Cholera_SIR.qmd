@@ -1,0 +1,151 @@
+---
+title: "Cholera Model"
+format: pdf
+editor: visual
+---
+
+### **1. Setup the SIR Model with Interventions**
+
+We’ll use the `epidemics` package for flexible compartmental modeling. Install it first
+
+```{r}
+# Install Epiverse packages
+install.packages("epidemics", repos = c("https://epiverse-trace.r-universe.dev", "https://cloud.r-project.org"))
+```
+
+### **2. Model Equations with Interventions**
+
+We’ll extend the classic SIR model to include:
+
+-   **Vaccination**: Reduces susceptible population.
+
+-   **Handwashing**: Reduces transmission rate (β).
+
+```{r,echo=FALSE,warning=FALSE}
+library(odin)
+library(ggplot2)
+
+# Define the model with death rate, vaccination, and handwashing
+model <- odin::odin({
+  deriv(S) <- -beta * S * I / N - vax_rate * S
+  deriv(I) <- beta * S * I / N - gamma * I - mu * I
+  deriv(R) <- gamma * I
+  deriv(D) <- mu * I  # Deaths from infected compartment
+  deriv(V) <- vax_rate * S  # Vaccinated compartment
+  
+  # Initial conditions
+  initial(S) <- S0
+  initial(I) <- I0
+  initial(R) <- R0
+  initial(D) <- 0
+  initial(V) <- 0
+  
+  # Parameters
+  beta <- beta0 * (1 - hw_effect)  # Handwashing reduces transmission
+  N <- S0 + I0 + R0
+  S0 <- user(0)    # Susceptible population (Central Region)
+  I0 <- user(0)     # Initial confirmed cases 
+  R0 <- user(0)
+  gamma <- user(0) # Recovery rate (1/5 days⁻¹)
+  mu <- user(0)   # Death rate (19 deaths / 3000 suspected cases ≈ 0.6%)
+  beta0 <- user(0) # Baseline transmission rate (r0=2.6)
+  hw_effect <- user(0)  # Handwashing effect (baseline = 0)
+  
+  # Time-varying vaccination rate (starts at day 30)
+  vax_rate <- interpolate(
+    t_vax, vax_schedule, "constant"
+  )
+  t_vax[] <- user()  # Time points for vaccination schedule
+  vax_schedule[] <- user()  # Vaccination rates at corresponding times
+  dim(t_vax) <- user()
+  dim(vax_schedule) <- user()
+})
+
+
+```
+
+### **3. Simulate Scenarios**
+
+Compare **no intervention**, **vaccination only**, and **vaccination + handwashing**:
+
+```{r}
+# Parameters (based on Central Region data)
+parameters <- list(
+  S0 = 1e6,       # Estimated Susceptible population
+  I0 = 69,        # Initial confirmed cases per report (as of Feb 8, 2025)
+  R0 = 0,         # Initial Recovered
+  gamma = 0.2,    # Recovery rate
+  mu = 0.006,     # Death rate 
+  beta0 = 0.52,  # Baseline transmission rate
+  hw_effect = 0,  # Handwashing effect (baseline = 0)
+  t_vax = c(0, 20, 90),  # Time points for vaccination schedule (day 30 to day 90)
+  vax_schedule = c(0,0,0)  # Vaccination rates at time points
+)
+
+# Create models with interventions using do.call()
+sim_baseline <- do.call(model$new, parameters)
+
+# Vaccination scenario:potency rate of vaccine (50% potency at initial vacination and reduction in potency 40% at day 90) 
+sim_vax <- do.call(model$new, modifyList(parameters, list(
+  vax_schedule = c(0, 0.50,0.40),# Vaccination starts at day 30
+  hw_effect = 0  
+)))
+
+# Vaccination + Handwashing (15% transmission reduction)
+sim_vax_hw <- do.call(model$new, modifyList(parameters, list(
+  vax_schedule = c(0, 0.50, 0.40),  # Vaccination starts at day 30
+  hw_effect = 0.1  # 10% transmission reduction
+)))
+
+# Run simulations for 120 days
+times <- seq(0, 120, by = 1)
+out_baseline <- sim_baseline$run(times)
+out_vax <- sim_vax$run(times)
+out_vax_hw <- sim_vax_hw$run(times)
+```
+
+### **4. Visualize Results**
+
+```{r}
+# Convert baseline output to data frame
+out_baseline_results <- data.frame(
+  Time = times,
+  Susceptible = out_baseline[, "S"],
+  Infected = out_baseline[, "I"],
+  Recovered = out_baseline[, "R"],
+  Deaths = out_baseline[, "D"],
+  Vaccinated = out_baseline[, "V"]
+)
+
+# Combine results into a data frame
+compare_results <- rbind(
+  data.frame(Time = times, Model = "Baseline", Infected = out_baseline[, "I"]),
+  data.frame(Time = times, Model = "Vaccination", Infected = out_vax[, "I"]),
+  data.frame(Time = times, Model = "Vaccination + Handwashing", Infected = out_vax_hw[, "I"])
+)
+
+# Plot
+# Plot results
+ggplot(out_baseline_results, aes(x = Time)) +
+  geom_line(aes(y = Susceptible, color = "Susceptible"), linewidth = 1.2) +
+  geom_line(aes(y = Infected, color = "Infected"), linewidth = 1.2) +
+  geom_line(aes(y = Recovered, color = "Recovered"), linewidth = 1.2) +
+  labs(
+    title = "Cholera Outbreak Stimulation in Central Region, Ghana",
+    subtitle = "SIR Model with Deaths, Vaccination (starts at day 30), and Handwashing (10% reduction)",
+    y = "Number of Individuals",
+    x = "Time (Days)",
+    color = "Compartment"
+  ) +
+  theme_minimal()
+
+ggplot(compare_results, aes(x = Time, y = Infected, color = Model)) +
+  geom_line(linewidth = 1.2) +
+  labs(
+    title = "Cholera Outbreak Stimulation in Ghana: Impact of Interventions",
+    subtitle = "SIR Model with Vaccination and Handwashing Interventions",
+    y = "Active Infections",
+    caption = "Assumptions: R0 = 2.5, 5-day infectious period, 120-day simulation"
+  ) +
+  theme_minimal()
+```
